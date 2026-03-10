@@ -1,0 +1,25 @@
+# Virtual environment
+.venv/
+
+# Python bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Jupyter checkpoints
+.ipynb_checkpoints/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# Saved models (uncomment if you want to track them)
+# ppo_hedging.zip
+# ppo_hedging_vecnormalize.pkl
+
+# Generated plots (uncomment if you want to track them)
+# bs_benchmark.png
