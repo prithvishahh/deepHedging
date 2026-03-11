@@ -31,10 +31,10 @@ class DerivativeHedgingEnv(gym.Env):
         new hedge ratio in [0, 1]
 
     Reward:
-        At each step:   r_t = dW - λ·(dW²) - α·(Δδ)²
-        At terminal step: r_T = W_T - λ·(W_T²) - α·(Δδ_T)²
-        λ (risk_penalty)       controls risk-aversion strength.
-        α (smoothness_penalty) penalises large changes in hedge position.
+        At each step:     r_t = -λ·(dW)² - α·(Δδ)²
+        At terminal step: r_T = -λ·(W_T)² - α·(Δδ_T)²
+        λ (risk_penalty)       penalises step-wise and terminal P&L variance.
+        α (smoothness_penalty) secondary penalty on large position changes.
     """
 
     metadata = {"render_modes": []}
@@ -48,8 +48,8 @@ class DerivativeHedgingEnv(gym.Env):
         r: float = 0.05,
         n_steps: int = 30,
         transaction_cost_rate: float = 0.001,
-        risk_penalty: float = 0.1,
-        smoothness_penalty: float = 0.05,
+        risk_penalty: float = 1.0,
+        smoothness_penalty: float = 0.01,
 
         # --- Heston stochastic volatility parameters ---
         v0: float | None = None,
@@ -225,18 +225,15 @@ class DerivativeHedgingEnv(gym.Env):
         self.wealth = self._cash + self.delta * self.S - V_new
         dW = self.wealth - old_wealth
 
-        # 5. reward: variance-penalty + smoothness-penalty
-        #   trade_size = new_delta - old_delta is already computed in step 1.
-        #   Smoothness penalty: α·(Δδ)²  — applied every step so the agent
-        #   learns to prefer gradual rebalancing over large discrete jumps.
-        #   Intermediate steps: r_t = dW - λ·dW² - α·(Δδ)²
-        #   Terminal step:      r_T = W_T - λ·W_T² - α·(Δδ)²
+        # 5. reward: per-step variance penalty + smoothness penalty
+        #   Intermediate: r_t = -λ·dW²  - α·(Δδ)²  — dense hedging signal each step
+        #   Terminal:     r_T = -λ·W_T² - α·(Δδ)²  — drive terminal wealth → 0
         smoothness_pen = self.smoothness_penalty * trade_size ** 2
         terminated = self._step_idx >= self.n_steps
         if terminated:
-            reward = float(self.wealth - self.risk_penalty * self.wealth**2 - smoothness_pen)
+            reward = float(-self.risk_penalty * self.wealth**2 - smoothness_pen)
         else:
-            reward = float(dW - self.risk_penalty * dW**2 - smoothness_pen)
+            reward = float(-self.risk_penalty * dW**2 - smoothness_pen)
         truncated = False
 
         obs = self._get_obs()
