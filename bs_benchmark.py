@@ -46,7 +46,7 @@ def run_bs_hedge(
 
     for i in range(n_episodes):
         obs, info = env.reset(seed=seed + i)
-        cumulative_pnl[i, 0] = obs[4]  # wealth starts at 0
+        cumulative_pnl[i, 0] = obs[5]  # wealth starts at 0
 
         ep_reward = 0.0
         ep_cost = 0.0
@@ -60,9 +60,10 @@ def run_bs_hedge(
 
             ep_reward += reward
             ep_cost += info["trade_cost"]
-            cumulative_pnl[i, t + 1] = obs[4]  # net wealth
+            # net weatth
+            cumulative_pnl[i, t + 1] = obs[5]
 
-        final_pnl[i] = obs[4]  # terminal net wealth IS the P&L
+        final_pnl[i] = obs[5]
         total_costs[i] = ep_cost
         total_rewards[i] = ep_reward
 
@@ -76,9 +77,7 @@ def run_bs_hedge(
     }
 
 
-# ----------------------------------------------------------------------
 # Quick stand-alone run with summary statistics
-# ----------------------------------------------------------------------
 if __name__ == "__main__":
     results = run_bs_hedge(n_episodes=10_000, seed=0)
 
@@ -89,7 +88,7 @@ if __name__ == "__main__":
     print(f"Mean reward    : {results['mean_reward']:.4f}")
     print(f"Mean tx cost   : {np.mean(results['total_costs']):.4f}")
 
-    # optional: histogram (if matplotlib is available)
+    # histogram
     try:
         import matplotlib.pyplot as plt
 

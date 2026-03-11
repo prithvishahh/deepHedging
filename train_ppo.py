@@ -13,14 +13,13 @@ from env import DerivativeHedgingEnv
 
 
 def make_env(**kwargs):
-    """Factory that returns a callable for DummyVecEnv."""
     def _init():
         return DerivativeHedgingEnv(**kwargs)
     return _init
 
 
 def train(
-    total_timesteps: int = 200_000,
+    total_timesteps: int = 2_000_000,
     save_path: str = "ppo_hedging",
     n_envs: int = 8,
     **env_kwargs,
@@ -33,10 +32,10 @@ def train(
         "MlpPolicy",
         vec_env,
         learning_rate=3e-4,
-        n_steps=1024,
+        n_steps=2048,
         batch_size=256,
         n_epochs=10,
-        gamma=1.0,           # no discounting – we care about total episode P&L
+        gamma=0.999,
         gae_lambda=0.95,
         clip_range=0.2,
         ent_coef=0.01,
@@ -57,7 +56,7 @@ def train(
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--timesteps", type=int, default=200_000)
+    parser.add_argument("--timesteps", type=int, default=2_000_000)
     parser.add_argument("--save-path", type=str, default="ppo_hedging")
     args = parser.parse_args()
 

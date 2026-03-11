@@ -21,9 +21,9 @@ You sold a European call option. The market moves. You need to **dynamically adj
 But Black-Scholes makes assumptions that reality doesn't respect:
 - It assumes **continuous** trading (you can't trade every nanosecond)
 - It ignores **transaction costs** (every trade costs money)
-- It assumes **constant volatility** (it never is)
+- It assumes **constant volatility** (it never is — volatility itself is random)
 
-**Deep Hedging** throws away the formula and lets an RL agent learn the optimal hedging strategy directly from simulated experience — transaction costs, discrete time steps, and all.
+**Deep Hedging** throws away the formula and lets an RL agent learn the optimal hedging strategy directly from simulated experience — stochastic volatility, transaction costs, discrete time steps, and all.
 
 ## How It Works
 
@@ -36,8 +36,8 @@ But Black-Scholes makes assumptions that reality doesn't respect:
 │                                                         │
 │   Action: New hedge ratio ∈ [0, 1]                      │
 │                                                         │
-│   Dynamics: Geometric Brownian Motion (GBM)             │
-│   Costs: Proportional transaction costs (1 bp/trade)    │
+│   Dynamics: Heston Stochastic Volatility              │
+│   Costs: Proportional transaction costs (0.1%/trade)   │
 │   Reward: −λ(ΔWealth)² (penalise P&L variance)         │
 │                                                         │
 │   Wealth = Cash + Stock Holdings − Option Liability     │
@@ -61,7 +61,7 @@ But Black-Scholes makes assumptions that reality doesn't respect:
 
 ```
 deepHedging/
-├── env.py                          # Gymnasium environment (GBM, transaction costs, reward)
+├── env.py                          # Gymnasium environment (Heston SV, transaction costs, reward)
 ├── train_ppo.py                    # CLI script to train the PPO agent
 ├── bs_benchmark.py                 # CLI script to run the BS delta baseline
 ├── deep_hedging_comparison.ipynb   # All-in-one notebook: train, evaluate, visualise
@@ -73,7 +73,7 @@ deepHedging/
 
 | File | What it does |
 |---|---|
-| **`env.py`** | The heart of the project. A Gymnasium-compliant environment that simulates discrete-time delta hedging of a European call under GBM with proportional transaction costs. All other files import from here. |
+| **`env.py`** | The heart of the project. A Gymnasium-compliant environment that simulates discrete-time delta hedging of a European call under **Heston stochastic volatility** with proportional transaction costs. All other files import from here. |
 | **`train_ppo.py`** | Standalone training script. Wraps the env in `DummyVecEnv` + `VecNormalize`, trains a PPO agent, and saves the model. Supports command-line arguments. |
 | **`bs_benchmark.py`** | Runs the textbook Black-Scholes delta strategy over thousands of Monte-Carlo paths and reports P&L statistics. The "opponent" our RL agent is trying to beat. |
 | **`deep_hedging_comparison.ipynb`** | The main deliverable. Trains the agent, runs both strategies on identical price paths, and produces comparison plots. Also demonstrates usage of all standalone scripts. |
@@ -96,11 +96,11 @@ Open `deep_hedging_comparison.ipynb` and run all cells.
 
 **Option B — Command line:**
 ```bash
-# Train with defaults (200k timesteps)
+# Train with defaults (2M timesteps)
 python train_ppo.py
 
-# Train longer for better results
-python train_ppo.py --timesteps 1000000 --save-path ppo_hedging_1M
+# Train with custom settings
+python train_ppo.py --timesteps 500000 --save-path ppo_hedging_500k
 ```
 
 ### 3. Run the Black-Scholes Baseline
@@ -122,19 +122,30 @@ The notebook evaluates both strategies on **1,000 identical test paths** and pro
 | `S0` | 100.0 | Initial stock price |
 | `K` | 100.0 | Strike price |
 | `T` | 30/365 | Time to maturity (≈ 1 month) |
-| `sigma` (σ) | 0.2 | Annualised volatility |
+| `sigma` (σ) | 0.2 | Annualised volatility (used for BS pricing) |
 | `r` | 0.05 | Risk-free interest rate |
 | `n_steps` | 30 | Number of hedging intervals |
-| `transaction_cost_bps` | 1.0 | Proportional cost per trade (basis points) |
-| `risk_penalty` (λ) | 1.0 | Reward scaling: $r_t = -\lambda (\Delta W_t)^2$ |
+| `transaction_cost_rate` | 0.001 | Proportional cost rate per trade (0.001 = 0.1%) |
+| `risk_penalty` (λ) | 0.1 | Variance-penalty coefficient |
+| `v0` | σ² | Initial instantaneous variance |
+| `kappa` (κ) | 2.0 | Variance mean-reversion speed |
+| `theta` (θ) | σ² | Long-run variance level |
+| `sigma_v` (σ_v) | 0.3 | Vol-of-vol |
+| `rho` (ρ) | −0.7 | Correlation between price and variance shocks |
 
 ## The Math
 
-**Stock dynamics** (Geometric Brownian Motion):
+**Stock dynamics** (Heston Stochastic Volatility):
 
-$$S_{t+1} = S_t \cdot \exp\left[\left(r - \tfrac{\sigma^2}{2}\right)\Delta t + \sigma\sqrt{\Delta t}\;Z_t\right], \quad Z_t \sim \mathcal{N}(0,1)$$
+$$dS_t = \mu\, S_t\, dt + \sqrt{v_t}\, S_t\, dW_t^{(1)}$$
 
-**Black-Scholes delta** (the baseline):
+$$dv_t = \kappa(\theta - v_t)\, dt + \sigma_v \sqrt{v_t}\, dW_t^{(2)}$$
+
+$$\text{corr}(dW^{(1)}, dW^{(2)}) = \rho$$
+
+Discretised via log-Euler for S and Euler–Maruyama for v, with variance floored at zero.
+
+**Black-Scholes delta** (the baseline — assumes constant vol):
 
 $$\Delta_{BS} = N(d_1), \quad d_1 = \frac{\ln(S/K) + (r + \sigma^2/2)\tau}{\sigma\sqrt{\tau}}$$
 
@@ -153,10 +164,12 @@ where $W_t = \text{Cash}_t + \delta_t \cdot S_t - V_t$ is the net wealth of the 
 
 ## Key Insights
 
-- With **zero transaction costs**, the BS delta is near-optimal — the RL agent learns to approximately replicate it.
+- With **zero transaction costs and constant vol**, the BS delta is near-optimal — the RL agent learns to approximately replicate it.
+- Under **Heston dynamics** the true volatility is stochastic, so BS delta (which assumes constant σ) is systematically wrong — the RL agent can exploit the realised-vol signal in its observation to outperform.
 - With **non-zero transaction costs**, the RL agent learns to trade *less frequently* than BS delta, resulting in lower cumulative costs and potentially tighter P&L distributions.
-- The quadratic reward naturally makes the agent **risk-averse** — it prefers consistent small errors over occasional large ones.
-- Increasing training timesteps (500k–1M+) significantly improves the RL agent's performance.
+- The **negative correlation** (ρ = −0.7) produces a realistic volatility skew: vol rises when markets fall, exactly as seen in equity markets.
+- The variance-penalty reward naturally makes the agent **risk-averse** — it prefers consistent small errors over occasional large ones.
+- Default training is 2M timesteps — sufficient for policy convergence on this task.
 
 ## License
 
